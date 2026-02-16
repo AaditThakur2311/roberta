@@ -140,20 +140,19 @@ export const SyncManager = () => {
         return () => {
             unsub();
         };
-        // Flush on unload
-        useEffect(() => {
-            const handleUnload = () => {
-                const state = useStore.getState();
-                if (state.syncState.status === 'syncing' || state.syncState.status === 'idle') {
-                    // Attempt purely synchronous, or beacon? 
-                    // sendBeacon doesn't support custom headers for Supabase easily.
-                    // We'll just try to fire the promise.
-                    // Best effort.
-                }
-            };
-            window.addEventListener('beforeunload', handleUnload);
-            return () => window.removeEventListener('beforeunload', handleUnload);
-        }, []);
+    }, [user]);
 
-        return null; // This component handles logic only
-    };
+    // Flush on unload
+    useEffect(() => {
+        const handleUnload = () => {
+            const state = useStore.getState();
+            if (state.syncState.status === 'syncing' || state.syncState.status === 'idle') {
+                // Best effort sync
+            }
+        };
+        window.addEventListener('beforeunload', handleUnload);
+        return () => window.removeEventListener('beforeunload', handleUnload);
+    }, []);
+
+    return null;
+};

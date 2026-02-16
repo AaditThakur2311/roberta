@@ -46,8 +46,6 @@ export const useStore = create<CoreStore>((set, get) => ({
         coolingVentsActive: false,
         emergencyVentsActive: false,
         structuralDamage: false
-        emergencyVentsActive: false,
-        structuralDamage: false
     },
     syncState: {
         status: 'idle',
@@ -55,7 +53,7 @@ export const useStore = create<CoreStore>((set, get) => ({
         errorMessage: null
     },
 
-    setSyncStatus: (status, msg = null) => set(state => ({
+    setSyncStatus: (status: 'idle' | 'syncing' | 'synced' | 'error' | 'offline', msg: string | null = null) => set(state => ({
         syncState: { ...state.syncState, status, errorMessage: msg, ...(status === 'synced' ? { lastSyncedAt: new Date() } : {}) }
     })),
 
