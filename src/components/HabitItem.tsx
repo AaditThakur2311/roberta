@@ -10,10 +10,6 @@ interface HabitItemProps {
 export const HabitItem = ({ habit }: HabitItemProps) => {
     const completeHabit = useStore(state => state.completeHabit);
 
-    const handleComplete = () => {
-        completeHabit(habit.id);
-    };
-
     // Check if completed today
     const isCompletedToday = !!(habit.lastCompleted &&
         new Date(habit.lastCompleted).toDateString() === new Date().toDateString());

@@ -66,7 +66,7 @@ export const SyncManager = () => {
                 }
 
                 let habitsToSave = state.habits;
-                let artifactsToSave = state.artifacts;
+                // let artifactsToSave = state.artifacts; // (Unused for now)
 
                 // 2. Merge if remote data exists
                 if (remoteData) {

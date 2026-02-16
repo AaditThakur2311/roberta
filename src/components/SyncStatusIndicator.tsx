@@ -2,7 +2,7 @@ import { useStore } from '@/store/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const SyncStatusIndicator = () => {
-    const { status, errorMessage } = useStore(state => state.syncState);
+    const { status } = useStore(state => state.syncState);
 
     if (status === 'idle') return null;
 

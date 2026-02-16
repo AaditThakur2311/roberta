@@ -17,10 +17,62 @@ export class AudioEngine {
         }
     }
 
-    public toggleSound(enabled: boolean) {
-        this.soundEnabled = enabled;
-        if (this.ctx?.state === 'suspended' && enabled) {
-            this.ctx.resume();
+    public async initialize() {
+        if (this.ctx?.state === 'suspended') {
+            await this.ctx.resume();
+        }
+        this.soundEnabled = true;
+    }
+
+    public setVolume(vol: number) {
+        if (this.masterGain) {
+            this.masterGain.gain.setTargetAtTime(vol, this.ctx?.currentTime || 0, 0.1);
+        }
+    }
+
+    private humOsc: OscillatorNode | null = null;
+    private humGain: GainNode | null = null;
+
+    public startReactorHum(stability: number) {
+        if (!this.ctx || !this.soundEnabled) return;
+        if (this.humOsc) return;
+
+        this.humOsc = this.ctx.createOscillator();
+        this.humGain = this.ctx.createGain();
+
+        this.humOsc.type = 'sawtooth';
+        this.humOsc.frequency.value = 40 + (stability * 20); // Base rumble
+
+        // Lowpass filter for muffled sound
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 100;
+
+        this.humGain.gain.value = 0.1;
+
+        this.humOsc.connect(filter);
+        filter.connect(this.humGain);
+        this.humGain.connect(this.masterGain!);
+
+        this.humOsc.start();
+    }
+
+    public stopReactorHum() {
+        if (this.humOsc) {
+            this.humOsc.stop();
+            this.humOsc.disconnect();
+            this.humOsc = null;
+        }
+        if (this.humGain) {
+            this.humGain.disconnect();
+            this.humGain = null;
+        }
+    }
+
+    public updateReactorPitch(stability: number) {
+        if (this.humOsc && this.ctx) {
+            const targetFreq = 40 + (stability * 40);
+            this.humOsc.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.5);
         }
     }
 

@@ -9,12 +9,9 @@ import { QuestPanel } from './QuestPanel';
 import { AudioControls } from './AudioControls';
 import { EthicalControls } from './EthicalControls';
 import { AuthModal } from './AuthModal';
-import { SyncStatusIndicator } from './SyncStatusIndicator';
 import { useAuth } from '@/contexts/AuthContext';
-
 import { SyncStatusIndicator } from './SyncStatusIndicator';
 import { NotificationContainer } from './NotificationContainer';
-import { useAuth } from '@/contexts/AuthContext';
 
 export const HUDOverlay = () => {
     const [isAuthOpen, setIsAuthOpen] = useState(false);
