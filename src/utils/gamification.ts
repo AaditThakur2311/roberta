@@ -36,7 +36,7 @@ export const calculateEnergyGain = (
     habit: Habit,
     artifacts: Artifact[],
     isOverdrive: boolean
-): number => {
+) => {
     const baseEnergy = ENERGY_PER_HABIT;
     const streakMultiplier = calculateStreakMultiplier(habit.currentStreak);
 
@@ -47,26 +47,32 @@ export const calculateEnergyGain = (
     const totalMultiplier = streakMultiplier * (1 + energyMultiplierBuffs);
     const overdriveMultiplier = isOverdrive ? 2.0 : 1.0;
 
-    return baseEnergy * totalMultiplier * overdriveMultiplier;
+    const energyGain = baseEnergy * totalMultiplier * overdriveMultiplier;
+    const newStreak = habit.currentStreak + 1;
+
+    return { energyGain, newStreak };
 };
 
 // Update reactor energy based on time decay
 export const updateReactorEnergy = (
     reactor: ReactorState,
     artifacts: Artifact[]
-): number => {
+) => {
     const now = new Date();
     const lastUpdate = new Date(reactor.lastDecayUpdate);
     const hoursSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60);
 
     if (reactor.isHibernating) {
-        return reactor.currentEnergy; // No decay in hibernation
+        return { energy: reactor.currentEnergy, stability: reactor.stability };
     }
 
     const effectiveDecay = calculateEffectiveDecay(artifacts);
     const energyLoss = hoursSinceUpdate * effectiveDecay;
 
-    return Math.max(0, reactor.currentEnergy - energyLoss);
+    const energy = Math.max(0, reactor.currentEnergy - energyLoss);
+    const stability = energy / calculateMaxCapacity(artifacts);
+
+    return { energy, stability };
 };
 
 // Calculate stability percentage

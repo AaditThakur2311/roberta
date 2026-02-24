@@ -134,3 +134,13 @@ export interface CoreStore {
     addNotification: (message: string, type: 'success' | 'error' | 'info' | 'critical') => void;
     removeNotification: (id: string) => void;
 }
+
+declare global {
+    interface Window {
+        __triggerReactorPulse?: () => void;
+        __audioEngine?: {
+            playCompletionSound: (category: string) => void;
+        };
+    }
+}
+

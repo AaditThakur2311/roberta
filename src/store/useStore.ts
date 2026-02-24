@@ -3,17 +3,12 @@ import { create } from 'zustand';
 import type { CoreStore, Habit, Artifact, Quest, AsteroidEvent } from '@/types';
 import {
     calculateEnergyGain,
-    calculateStability,
-    calculateMaxCapacity,
     calculateShieldLevel,
     generateId,
-    shouldBreakStreak,
-    detectIdleState,
     updateReactorEnergy,
     CRITICAL_THRESHOLD,
     OVERDRIVE_THRESHOLD
 } from '@/utils/gamification';
-import { rollForEvent } from '@/utils/eventGenerator';
 import { generateEmergencyQuest } from '@/utils/questGenerator';
 
 
@@ -111,7 +106,7 @@ export const useStore = create<CoreStore>((set, get) => ({
         }
 
         // Calculate energy gain
-        const { energyGain, newStreak } = calculateEnergyGain(habit, state.artifacts);
+        const { energyGain, newStreak } = calculateEnergyGain(habit, state.artifacts, state.reactor.isOverdrive);
 
         // Update habit
         const updatedHabits = [...state.habits];
@@ -163,9 +158,7 @@ export const useStore = create<CoreStore>((set, get) => ({
         const { reactor, artifacts } = state;
 
         const { energy: newEnergy, stability: newStability } = updateReactorEnergy(
-            reactor.currentEnergy,
-            reactor.maxCapacity,
-            reactor.lastDecayUpdate,
+            reactor,
             artifacts
         );
 
@@ -297,7 +290,7 @@ export const useStore = create<CoreStore>((set, get) => ({
         const state = get();
         set({
             modularGeometry: {
-                shieldRings: calculateShieldLevel(state.artifacts),
+                shieldRings: calculateShieldLevel(state.artifacts.length),
                 coolingVentsActive: state.reactor.stability > 0.5,
                 emergencyVentsActive: state.reactor.stability < 0.3,
                 structuralDamage: state.reactor.stability < 0.1
