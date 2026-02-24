@@ -77,146 +77,75 @@ export const useStore = create<CoreStore>((set, get) => ({
 
     completeHabit: (id) => {
         const state = get();
-        const habit = state.habits.find(h => h.id === id);
-        if (!habit) return;
+        const habitIndex = state.habits.findIndex(h => h.id === id);
+        if (habitIndex === -1) return;
 
-        // Ethical check: Daily Cap
+        const habit = state.habits[habitIndex];
+        const now = new Date();
+
+        // Check if already completed today
+        const isCompletedToday = habit.lastCompleted &&
+            new Date(habit.lastCompleted).toDateString() === now.toDateString();
+
+        if (isCompletedToday) return;
+
+        // Ethical Balance Check
         if (state.ethicalSettings.enabled && !state.ethicalSettings.sessionOverride) {
-            const today = new Date();
-            const habitsToday = state.habits.reduce((count, h) => {
-                const completedToday = h.completionHistory.some(d =>
-                    new Date(d).getDate() === today.getDate() &&
-                    new Date(d).getMonth() === today.getMonth() &&
-                    new Date(d).getFullYear() === today.getFullYear()
-                );
-                return count + (completedToday ? 1 : 0);
-            }, 0);
-
-            if (habitsToday >= state.ethicalSettings.dailyCap) {
-                console.log('Daily cap reached.');
-                get().addNotification('DAILY CAPACITY EXCEEDED - SYSTEM COOLDOWN ACTIVE', 'critical');
-                // Proceed to update habit but set energyGain to 0
-            }
-        }
-
-        let energyGain = calculateEnergyGain(habit, state.artifacts, state.reactor.isOverdrive);
-
-        // Ethical Check Implementation (Zero energy if capped)
-        const today = new Date();
-        const habitsToday = state.habits.reduce((count, h) => {
-            // simplified logic for checking if completed today. 
-            // In real app, completionHistory holds all dates. 
-            // We need to count completions from *today* across all habits? 
-            // Or just count how many habits were done today?
-            // Assuming total completions today.
-            return count + h.completionHistory.filter(d =>
-                new Date(d).getDate() === today.getDate() &&
-                new Date(d).getMonth() === today.getMonth() &&
-                new Date(d).getFullYear() === today.getFullYear()
+            const todayCount = state.habits.filter(h =>
+                h.lastCompleted && new Date(h.lastCompleted).toDateString() === now.toDateString()
             ).length;
-        }, 0);
 
-        if (state.ethicalSettings.enabled && !state.ethicalSettings.sessionOverride) {
-            if (habitsToday >= state.ethicalSettings.dailyCap) {
-                energyGain = 0;
+            if (todayCount >= state.ethicalSettings.dailyCap) {
+                state.addNotification("Daily ethical limit reached. Energy gain suspended for sustainability.", "info");
+                // Log metadata but skip energy gain
+                const updatedHabits = [...state.habits];
+                updatedHabits[habitIndex] = {
+                    ...habit,
+                    lastCompleted: now,
+                    completionHistory: [...habit.completionHistory, now]
+                };
+                set({ habits: updatedHabits });
+                state.saveToLocalStorage();
+                return;
             }
         }
+
+        // Calculate energy gain
+        const { energyGain, newStreak } = calculateEnergyGain(habit, state.artifacts);
 
         // Update habit
-        const updatedHabits = state.habits.map(h => {
-            if (h.id === id) {
-                const now = new Date();
-                return {
-                    ...h,
-                    currentStreak: h.currentStreak + 1,
-                    lastCompleted: now,
-                    completionHistory: [...h.completionHistory, now]
-                };
-            }
-            return h;
-        });
+        const updatedHabits = [...state.habits];
+        updatedHabits[habitIndex] = {
+            ...habit,
+            currentStreak: newStreak,
+            lastCompleted: now,
+            completionHistory: [...habit.completionHistory, now]
+        };
 
-        // Update Quest Progress
-        const activeQuests = state.quests.filter(q => !q.completed && new Date(q.expiresAt) > new Date());
-        let questUpdates = state.quests;
-
-        if (activeQuests.length > 0) {
-            questUpdates = state.quests.map(q => {
-                if (q.completed || new Date(q.expiresAt) <= new Date()) return q;
-
-                // Check category requirement
-                if (q.requirements.category && q.requirements.category !== habit.category) return q;
-
-                const newProgress = q.progress + 1;
-                const isComplete = newProgress >= (q.requirements.habitCount || 1);
-
-                if (isComplete) {
-                    // Apply quest reward
-                    energyGain += q.reward.energy;
-
-                    if ((window as any).__audioEngine) {
-                        (window as any).__audioEngine.playCompletionSound('creative'); // Victory sound
-                    }
-                }
-
-                return {
-                    ...q,
-                    progress: newProgress,
-                    completed: isComplete
-                };
-            });
-        }
-
-        // Update reactor energy
-        const maxCapacity = calculateMaxCapacity(state.artifacts);
-        const newEnergy = Math.min(state.reactor.currentEnergy + energyGain, maxCapacity);
-        const stability = calculateStability(newEnergy, maxCapacity);
-
-        // Check for Quest Exit Critical
-        const criticalExit = questUpdates.some(q => q.completed && q.reward.exitCritical);
-        const isCritical = criticalExit ? false : stability < CRITICAL_THRESHOLD;
+        // Update reactor
+        const newEnergy = Math.min(state.reactor.maxCapacity, state.reactor.currentEnergy + energyGain);
+        const newStability = newEnergy / state.reactor.maxCapacity;
 
         set({
             habits: updatedHabits,
-            quests: questUpdates,
             reactor: {
                 ...state.reactor,
                 currentEnergy: newEnergy,
-                maxCapacity,
-                stability,
-                isCritical,
-                isOverdrive: stability > OVERDRIVE_THRESHOLD,
-                lastDecayUpdate: new Date()
+                stability: newStability,
+                isCritical: newStability < CRITICAL_THRESHOLD,
+                isOverdrive: newStability > OVERDRIVE_THRESHOLD
             }
         });
 
-        // Trigger pulse effect
-        if ((window as any).__reactorPulse) {
-            (window as any).__reactorPulse();
-        }
+        // Trigger effects
+        if (window.__triggerReactorPulse) window.__triggerReactorPulse();
+        if (window.__audioEngine) window.__audioEngine.playCompletionSound(habit.category);
 
-        // Trigger particle burst
-        if ((window as any).__triggerParticleBurst) {
-            const categoryColors: Record<string, string> = {
-                physical: '#ff6b6b',
-                mental: '#4dabf7',
-                social: '#51cf66',
-                creative: '#cc5de8'
-            };
-            (window as any).__triggerParticleBurst([0, 0, 0], categoryColors[habit.category] || '#00aaff');
-        }
-
-        // Play completion sound
-        if ((window as any).__audioEngine) {
-            (window as any).__audioEngine.playCompletionSound(habit.category);
-        }
-
-        // Check for artifact unlock (7-day streak)
-        if ((habit.currentStreak + 1) % 7 === 0) {
+        // Check for artifact unlock
+        if (newStreak === 7) {
             get().unlockArtifact(id);
         }
 
-        // Update modular geometry
         get().updateModularGeometry();
         get().saveToLocalStorage();
     },
@@ -228,327 +157,201 @@ export const useStore = create<CoreStore>((set, get) => ({
         get().saveToLocalStorage();
     },
 
-    // Reactor actions
+    // Reactor Logic
     updateReactorEnergy: () => {
         const state = get();
-        const newEnergy = updateReactorEnergy(state.reactor, state.artifacts);
-        const maxCapacity = calculateMaxCapacity(state.artifacts);
-        const stability = calculateStability(newEnergy, maxCapacity);
+        const { reactor, artifacts } = state;
 
-        // Check for streak breaks
-        const updatedHabits = state.habits.map(habit => {
-            if (shouldBreakStreak(habit)) {
-                return {
-                    ...habit,
-                    currentStreak: 0
-                };
-            }
-            return habit;
-        });
-
-        // Check for idle state
-        const isIdle = detectIdleState(state.habits);
-
-        // Try to spawn event
-        const newEvent = rollForEvent();
-        const updatedEvents = newEvent
-            ? [...state.events, { ...newEvent, id: generateId() }]
-            : state.events;
-
-        // Check for Critical Mode -> Spawn Emergency Quest
-        let currentQuests = state.quests;
-        const isCritical = stability < CRITICAL_THRESHOLD;
-        const hasActiveEmergencyQuest = currentQuests.some(q =>
-            ['emergency_boost', 'repair', 'auxiliary_power'].includes(q.type) &&
-            !q.completed &&
-            new Date(q.expiresAt) > new Date()
+        const { energy: newEnergy, stability: newStability } = updateReactorEnergy(
+            reactor.currentEnergy,
+            reactor.maxCapacity,
+            reactor.lastDecayUpdate,
+            artifacts
         );
 
-        if (isCritical && !hasActiveEmergencyQuest) {
-            // 10% chance per tick to spawn quest if not already active to avoid spam? 
-            // Or spawn immediately when critical? Let's spawn immediately.
-            const quest = generateEmergencyQuest();
-            currentQuests = [...currentQuests, quest];
-
-            // Trigger alarm
-            if ((window as any).__audioEngine) {
-                // TODO: trigger alarm
-            }
-        }
-
         set({
-            habits: updatedHabits,
             reactor: {
-                ...state.reactor,
+                ...reactor,
                 currentEnergy: newEnergy,
-                maxCapacity,
-                stability,
-                isCritical,
-                isOverdrive: stability > OVERDRIVE_THRESHOLD,
-                isHibernating: isIdle,
+                stability: newStability,
+                isCritical: newStability < CRITICAL_THRESHOLD,
+                isOverdrive: newStability > OVERDRIVE_THRESHOLD,
                 lastDecayUpdate: new Date()
-            },
-            events: updatedEvents,
-            quests: currentQuests
+            }
         });
 
-        get().updateModularGeometry();
-        get().saveToLocalStorage();
+        // Trigger emergency quests if critical
+        if (newStability < CRITICAL_THRESHOLD && state.quests.length === 0) {
+            const quest = generateEmergencyQuest();
+            get().addQuest(quest);
+        }
     },
 
-    enterHibernation: () => {
-        set(state => ({
-            reactor: {
-                ...state.reactor,
-                isHibernating: true
-            }
-        }));
-    },
+    enterHibernation: () => set(state => ({
+        reactor: { ...state.reactor, isHibernating: true }
+    })),
 
-    exitHibernation: () => {
-        set(state => ({
-            reactor: {
-                ...state.reactor,
-                isHibernating: false
-            }
-        }));
-    },
+    exitHibernation: () => set(state => ({
+        reactor: { ...state.reactor, isHibernating: false }
+    })),
 
-    // Artifact actions
+    // Artifacts
     unlockArtifact: (habitId) => {
-        const state = get();
-        const habit = state.habits.find(h => h.id === habitId);
+        const habit = get().habits.find(h => h.id === habitId);
         if (!habit) return;
 
-        // Generate artifact based on category
-        const buffMap: Record<string, { type: any; value: number; name: string }> = {
-            physical: { type: 'decay_reduction', value: 0.05, name: 'Thermal Insulation' },
-            mental: { type: 'capacity_boost', value: 50, name: 'Neural Amplifier' },
-            social: { type: 'streak_protection', value: 1, name: 'Social Shield' },
-            creative: { type: 'energy_multiplier', value: 0.1, name: 'Inspiration Core' }
-        };
-
-        const buff = buffMap[habit.category];
-        const artifact: Artifact = {
+        const newArtifact: Artifact = {
             id: generateId(),
-            name: buff.name,
-            svgData: '', // TODO: Generate procedural SVG
-            buffType: buff.type,
-            buffValue: buff.value,
+            name: `${habit.category.toUpperCase()} CORE`,
+            svgData: '', // To be generated by component or utility
+            buffType: habit.category === 'physical' ? 'decay_reduction' :
+                habit.category === 'mental' ? 'capacity_boost' :
+                    habit.category === 'social' ? 'streak_protection' : 'energy_multiplier',
+            buffValue: 0.1,
             category: habit.category,
             unlockedAt: new Date()
         };
 
         set(state => ({
-            artifacts: [...state.artifacts, artifact],
-            reactor: {
-                ...state.reactor,
-                shieldLevel: calculateShieldLevel(state.artifacts.length + 1)
-            }
+            artifacts: [...state.artifacts, newArtifact]
         }));
 
-        get().saveToLocalStorage();
+        get().addNotification(`System Upgrade: ${newArtifact.name} Unlocked!`, "success");
+        get().updateModularGeometry();
     },
 
     consumeArtifact: (id) => {
+        // Emergency repair
         set(state => ({
             artifacts: state.artifacts.filter(a => a.id !== id),
             reactor: {
                 ...state.reactor,
-                currentEnergy: Math.min(
-                    state.reactor.currentEnergy + 500,
-                    state.reactor.maxCapacity
-                ),
-                shieldLevel: calculateShieldLevel(state.artifacts.length - 1)
+                currentEnergy: state.reactor.maxCapacity * 0.5,
+                isCritical: false
             }
         }));
-        get().saveToLocalStorage();
     },
 
-    // Quest actions
+    // Quests
     addQuest: (questData) => {
         const quest: Quest = {
             ...questData,
             id: generateId()
         };
-
         set(state => ({
             quests: [...state.quests, quest]
         }));
     },
 
     completeQuest: (id) => {
-        set(state => ({
-            quests: state.quests.map(q =>
-                q.id === id ? { ...q, completed: true } : q
-            )
-        }));
-    },
+        const quest = get().quests.find(q => q.id === id);
+        if (!quest) return;
 
-    // Ethical Actions
-    toggleEthicalMode: () => {
         set(state => ({
-            ethicalSettings: {
-                ...state.ethicalSettings,
-                enabled: !state.ethicalSettings.enabled
-            }
+            reactor: {
+                ...state.reactor,
+                currentEnergy: Math.min(state.reactor.maxCapacity, state.reactor.currentEnergy + quest.reward.energy),
+                isCritical: quest.reward.exitCritical ? false : state.reactor.isCritical
+            },
+            quests: state.quests.filter(q => q.id !== id)
         }));
+
+        get().addNotification(`Quest Completed: ${quest.name}`, "success");
         get().saveToLocalStorage();
     },
 
-    toggleSessionOverride: () => {
-        set(state => ({
-            ethicalSettings: {
-                ...state.ethicalSettings,
-                sessionOverride: !state.ethicalSettings.sessionOverride
-            }
-        }));
-        // Don't save override to local storage? Or do we? usually session override is transient.
-        // But for simplicity let's not persist it or handle it in load.
-        // We'll save it for now to persist across refreshes if user wants.
-        get().saveToLocalStorage();
-    },
-
-    // Event actions
+    // Events
     spawnEvent: (eventData) => {
         const event: AsteroidEvent = {
             ...eventData,
             id: generateId()
         };
-
         set(state => ({
             events: [...state.events, event]
         }));
     },
 
     claimEvent: (id) => {
-        const state = get();
-        const event = state.events.find(e => e.id === id);
-        if (!event || event.claimed) return;
+        const event = get().events.find(e => e.id === id);
+        if (!event) return;
 
-        // Apply reward
-        let energyBonus = event.reward.energy || 0;
+        if (event.reward.energy) {
+            set(state => ({
+                reactor: {
+                    ...state.reactor,
+                    currentEnergy: Math.min(state.reactor.maxCapacity, state.reactor.currentEnergy + event.reward.energy!)
+                }
+            }));
+        }
 
         set(state => ({
-            events: state.events.map(e =>
-                e.id === id ? { ...e, claimed: true } : e
-            ),
-            reactor: {
-                ...state.reactor,
-                currentEnergy: Math.min(
-                    state.reactor.currentEnergy + energyBonus,
-                    state.reactor.maxCapacity
-                )
-            }
+            events: state.events.filter(e => e.id !== id)
         }));
 
+        get().addNotification("Orbital Event Claimed", "info");
         get().saveToLocalStorage();
     },
 
-    // Modular geometry
+    // Visuals
     updateModularGeometry: () => {
         const state = get();
-        const maxStreak = Math.max(...state.habits.map(h => h.currentStreak), 0);
-        const { stability } = state.reactor;
-
         set({
             modularGeometry: {
-                shieldRings: [3, 7, 14].filter(milestone => maxStreak >= milestone).length,
-                coolingVentsActive: stability >= 0.5 && stability < 0.8,
-                emergencyVentsActive: stability < 0.2,
-                structuralDamage: stability < 0.1
+                shieldRings: calculateShieldLevel(state.artifacts),
+                coolingVentsActive: state.reactor.stability > 0.5,
+                emergencyVentsActive: state.reactor.stability < 0.3,
+                structuralDamage: state.reactor.stability < 0.1
             }
         });
     },
 
-    // Persistence
-    saveToLocalStorage: () => {
-        const state = get();
+    // Settings
+    toggleEthicalMode: () => set(state => ({
+        ethicalSettings: { ...state.ethicalSettings, enabled: !state.ethicalSettings.enabled }
+    })),
 
-        // Prune history > 90 days (Item 4)
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-
-        const prunedHabits = state.habits.map(h => ({
-            ...h,
-            completionHistory: h.completionHistory.filter(d => new Date(d) > ninetyDaysAgo)
-        }));
-
-        const dataToSave = {
-            habits: prunedHabits,
-            artifacts: state.artifacts,
-            reactor: state.reactor,
-            quests: state.quests,
-            events: state.events,
-            ethicalSettings: state.ethicalSettings
-        };
-
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-    },
-
-    loadFromLocalStorage: () => {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                set({
-                    habits: data.habits || [],
-                    artifacts: data.artifacts || [],
-                    reactor: data.reactor || get().reactor,
-                    quests: data.quests || [],
-                    events: data.events || [],
-                    ethicalSettings: data.ethicalSettings || get().ethicalSettings
-                });
-                get().updateModularGeometry();
-            } catch (error) {
-                console.error('Failed to load state:', error);
-                get().addNotification('Failed to load local save data', 'error');
-            }
-        }
-    },
+    toggleSessionOverride: () => set(state => ({
+        ethicalSettings: { ...state.ethicalSettings, sessionOverride: !state.ethicalSettings.sessionOverride }
+    })),
 
     // Notifications
     notifications: [],
     addNotification: (message, type) => {
         const id = generateId();
         set(state => ({
-            notifications: [...state.notifications, { id, message, type }]
+            notifications: [...state.notifications.slice(-4), { id, message, type }]
         }));
-        // Auto dismiss
         setTimeout(() => get().removeNotification(id), 5000);
     },
-    removeNotification: (id) => {
-        set(state => ({
-            notifications: state.notifications.filter(n => n.id !== id)
+    removeNotification: (id) => set(state => ({
+        notifications: state.notifications.filter(n => n.id !== id)
+    })),
+
+    // Persistence
+    saveToLocalStorage: () => {
+        const { habits, artifacts, reactor, quests, ethicalSettings } = get();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            habits,
+            artifacts,
+            reactor,
+            quests,
+            ethicalSettings
         }));
+    },
+
+    loadFromLocalStorage: () => {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                set(parsed);
+                // Fix: Ensure dates are valid
+                set(state => ({
+                    reactor: { ...state.reactor, lastDecayUpdate: new Date(state.reactor.lastDecayUpdate) }
+                }));
+            } catch (e) {
+                console.error("Failed to load state", e);
+            }
+        }
     }
 }));
-
-// Auto-update reactor energy every minute
-setInterval(() => {
-    useStore.getState().updateReactorEnergy();
-}, 60000);
-
-// Expose debug helpers
-if (typeof window !== 'undefined') {
-    (window as any).__spawnDebugEvent = () => {
-        useStore.getState().spawnEvent({
-            eventType: 'energy_surge',
-            reward: { energy: 50 },
-            triggeredAt: new Date(),
-            claimed: false,
-            expiresAt: new Date(Date.now() + 60000)
-        });
-    };
-
-    (window as any).__triggerEmergency = () => {
-        useStore.setState(state => ({
-            reactor: { ...state.reactor, stability: 0.1, isCritical: true, currentEnergy: 100 }
-        }));
-        useStore.getState().updateReactorEnergy();
-    };
-
-    (window as any).__toggleEthicalOverride = () => {
-        useStore.getState().toggleSessionOverride();
-    };
-}
